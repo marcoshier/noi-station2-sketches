@@ -1,6 +1,9 @@
 import lab.clustering.particle
 import org.openrndr.application
+import org.openrndr.color.ColorRGBa
 import org.openrndr.extra.noise.scatter
+import org.openrndr.extra.noise.uniform
+import org.openrndr.launch
 import particlesystem.createParticleSystem
 
 fun main() = application {
@@ -13,9 +16,17 @@ fun main() = application {
 
         val ps = createParticleSystem(drawer.bounds)
 
-        ps.particles = drawer.bounds.scatter(12.0, distanceToEdge = 100.0).map { particle(it, ps.maxParticleRadius) }
+        ps.particles = drawer.bounds.scatter(12.0, distanceToEdge = 100.0).map { particle(it, ps.maxParticleRadius, Int.uniform(-1, 2)) }
+
 
         ps.addCluster(0)
+        ps.addCluster(1, ColorRGBa.BLUE)
+
+        mouse.buttonUp.listen {
+            launch {
+                ps.join(0)
+            }
+        }
 
         extend {
 

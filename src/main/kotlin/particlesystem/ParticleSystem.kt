@@ -104,15 +104,12 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
 
             val toRemove = mutableSetOf<Int>()
             for (i in particles.indices) {
-                val t = particles[i].type
-                if (t != -1) {
-                    particles[i].type = idx
+                if (particles[i].type != idx) toRemove.add(particles[i].type)
+                particles[i].type = idx
 
-                    if (t != idx) toRemove.add(t)
 
-                    if (i % 10 == 0)
-                        yield()
-                }
+                if (i % 10 == 0)
+                    yield()
             }
 
 
@@ -232,7 +229,6 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
     inner class Cluster {
         lateinit var color: ColorRGBa
         lateinit var contour: ColorBuffer
-        lateinit var density: ColorBuffer
 
         var target: Vector2? = null
         var weight: Double = 1.0
@@ -240,7 +236,9 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
         var active = false
     }
 
+
     val clusters = mutableMapOf<Int, Cluster>()
+    val densities = arrayTexture(bounds.width.toInt(), bounds.height.toInt(), 512, type = ColorType.FLOAT32)
 
     fun addCluster(type: Int, color: ColorRGBa = ColorRGBa.WHITE, target: Vector2? = null, weight: Double = 1.0) {
         val c = clusters.getOrPut(type) {
@@ -249,7 +247,6 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
 
         c.color = color
         c.contour = colorBuffer(bounds.width.toInt(), bounds.height.toInt())
-        c.density = colorBuffer(bounds.width.toInt(), bounds.height.toInt(), type = ColorType.FLOAT32)
         c.weight = weight
         c.target = target
         c.active = true
@@ -304,9 +301,11 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
                     }
 
 
+                    ss.parameter("nActive", clusters.size)
                     ss.parameter("iTime", seconds)
                     ss.parameter("type", type)
-                    ss.parameter("densities", clusters.map { it.value.density }.toTypedArray())
+                    ss.parameter("densityTextures", densities)
+                    ss.parameter("size", bounds.dimensions)
 
                     drawer.shadeStyle = ss
                     drawer.rectangles {
@@ -323,6 +322,7 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
             }
 
 
+
             for ((i, cluster) in clusters) {
 
                 contour.contourColor = cluster.color.toLinear()
@@ -336,7 +336,11 @@ class ParticleSystem(val program: Program, val bounds: Rectangle, val maxParticl
                     }
                 }
 
-                densityGradient.apply(rt.colorBuffer(0), cluster.density)
+                val temp = colorBuffer(width, height, type = ColorType.FLOAT32)
+                densityGradient.apply(rt.colorBuffer(0), temp)
+                temp.copyTo(densities, i)
+                temp.destroy()
+
                 contour.levels = 0.15
                 contour.apply(rt.colorBuffer(0), cluster.contour)
 
@@ -370,15 +374,18 @@ private val densitySSpreamble = """
 }
                                     """.trimIndent()
 
-@Language("GLSL")
 private val densitySS = """
-    vec3 densities[p_densities.length];
-    vec2 ts = vec2(textureSize(p_density0, 0));
-    vec2 uv = c_screenPosition/ts;
-    uv.y = 1.0 - uv.y;
+    vec2 ts = p_size.xy;
     
-    for (int i = 0; i < p_densities.length; ++i) {
-        densities[i] = texture(p_densities[i], uv).rgb;
+    vec2 uv = c_screenPosition/ts;
+    if(${System.getProperty("GLES") == null}) {
+        uv.y = 1.0 - uv.y;
+    }
+    
+    vec3 densities[512];
+    
+    for (int i = 0; i < p_nActive; ++i) {
+        densities[i] = texture(p_densityTextures, vec3(uv, i)).rgb;
     }
 
     //float ed = length(va_texCoord0 - vec2(0.5));
